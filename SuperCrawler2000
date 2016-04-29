@@ -1,0 +1,210 @@
+import java.io.*;
+import java.net.URL;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class Main {
+
+    static int c = 0;
+    //максимальное число просматриваемых страниц
+    static final int maxUrls = 10;
+    private static final int MAIN_THREAD_SLEEP = 10000;
+    private static final int MAX_TREAD_NUMB = 10;
+    //Спсиок просмотренных странниц
+    static HashSet crawledList = new HashSet();
+
+    public static void spread(final String startUrl) {
+
+        URL verifiedUrl = verifyUrl(startUrl);
+        // Загрузить страницу с заданным url.
+        String pageContents = downloadPage(verifiedUrl);
+        if (pageContents == null)
+            return;
+        crawledList.add(startUrl);
+        // Извлечь список допустимых ссылок из страницы.
+        final ArrayList links = retrieveLinks(verifiedUrl, pageContents);
+
+        //Распределяем работу по потокам
+        int size = links.size();
+        int numb = (int) Math.floor(size * Math.pow(MAX_TREAD_NUMB, -1));
+        final HashSet tmpGroup = new HashSet();
+        for (int i = 0; i < links.size(); i += numb) {
+            if (crawledList.size() > maxUrls)
+                break;
+            for (int j = i; (j < i + numb); j++) {
+                if (j == size) break;
+                tmpGroup.add(links.get(j));
+            }
+            final HashSet crowGroup = (HashSet)tmpGroup.clone();
+            final Thread thread = new Thread(new Runnable() {
+                public void run() {
+                    сrawlGroup(crowGroup);
+                }
+            });
+            thread.start();
+            tmpGroup.clear();
+        }
+    }
+
+
+    public static void сrawlGroup(HashSet toCrawlList) {
+
+        if (crawledList.size() > maxUrls) {
+            return;
+        }
+        while (toCrawlList.size() > 0) {
+
+            if (crawledList.size() > maxUrls) {
+                return;
+            }
+            String url = (String) toCrawlList.iterator().next();
+            toCrawlList.remove(url);
+            URL verifiedUrl = verifyUrl(url);
+            String pageContents = downloadPage(verifiedUrl);
+            crawledList.add(url); // Добавить url в список пройденных.
+            if (pageContents != null && pageContents.length() > 0) {
+                // Извлечь список допустимых ссылок из страницы.
+                ArrayList links = retrieveLinks(verifiedUrl, pageContents);
+                // Добавить ссылки в список поиска.
+                toCrawlList.addAll(links);
+            }
+        }
+    }
+
+
+    private static ArrayList retrieveLinks(
+            URL pageUrl, String pageContents) {
+        // Компилировать ссылки шаблонов совпадений.
+        Pattern p =
+                Pattern.compile("<a\\s+href\\s*=\\s*\"?(.*?)[\"|>]",
+                        Pattern.CASE_INSENSITIVE);
+        Matcher m = p.matcher(pageContents);
+        // Создать список совпадающих ссылок.
+        ArrayList linkList = new ArrayList();
+        while (m.find()) {
+            String link = m.group(1).trim();
+            // Пропустить пустые ссылки.
+            if (link.length() < 1) {
+                continue;
+            }
+            // Пропустить ссылки, которые указывают на заданную страницу.
+            if (link.charAt(0) == '#') {
+                continue;
+            }
+            // Пропустить ссылки, которые используются
+            // для почтовых отправлений.
+            if (link.indexOf("mailto:") != -1) {
+                continue;
+            }
+            // Пропустить ссылки на сценарии JavaScript.
+            if (link.toLowerCase().indexOf("javascript") != -1) {
+                continue;
+            }
+            // Восстановить префикс абсолютного или относительного URL.
+            if (link.indexOf("://") == -1) {
+                // Обработать абсолютный URL.
+                if (link.charAt(0) == '/') {
+                    link = "http://" + pageUrl.getHost() + link;
+                    // Обработать относительный URL.
+                } else {
+                    String file = pageUrl.getFile();
+                    if (file.indexOf('/') == -1) {
+                        link = "http://" + pageUrl.getHost() + "/" + link;
+                    } else {
+                        String path =
+                                file.substring(0, file.lastIndexOf('/') + 1);
+                        link = "http://" + pageUrl.getHost() + path + link;
+                    }
+                }
+            }
+            // Удалить привязки из ссылок.
+            int index = link.indexOf('#');
+            if (index != -1) {
+                link = link.substring(0, index);
+            }
+            // Удалить начальные символы "www" из URL, если они есть.
+            link = removeWwwFromUrl(link);
+            // Проверить ссылки и отбросить все неправильные.
+            URL verifiedLink = verifyUrl(link);
+            if (verifiedLink == null) {
+                continue;
+            }
+            // Отбросить ссылки, если они уже просмотрены.
+            if (crawledList.contains(link)) {
+                continue;
+            }
+            // Добавить ссылку в список.
+            linkList.add(link);
+        }
+        return (linkList);
+    }
+
+    // Удалить начальные символы "www" из адреса, если они присутствуют.
+    private static String removeWwwFromUrl(String url) {
+        int index = url.indexOf("://www.");
+        if (index != -1) {
+            return url.substring(0, index + 3) +
+                    url.substring(index + 7);
+        }
+        return (url);
+    }
+
+    private static String downloadPage(URL pageUrl) {
+        try {
+            // Открыть соединение по заданному URL для чтения.
+            BufferedReader reader =
+                    new BufferedReader(new InputStreamReader(
+                            pageUrl.openStream()));
+            // Считать в буфер.
+            String line;
+            StringBuffer pageBuffer = new StringBuffer();
+            while ((line = reader.readLine()) != null) {
+                pageBuffer.append(line);
+            }
+            //СОХРАНЯЕМ СТРАНИЦУ НА ДИСК
+            String htmlFileName = ("C:\\CrawlerResult\\" + title(pageBuffer.toString()) + ".html");
+            FileWriter FWriter = new FileWriter(htmlFileName);
+            BufferedWriter BWriter = new BufferedWriter(FWriter);
+            BWriter.write(pageBuffer.toString());
+            BWriter.close();
+
+            return pageBuffer.toString();
+        } catch (Exception e) {
+        }
+
+        return null;
+    }
+
+    //Сформировать имя сохраняемой страницы
+    private static String title(String str) {
+        return str.substring(str.indexOf("title>") + 6, str.indexOf("</title>"));
+    }
+
+    // Проверить формат URL.
+    public static URL verifyUrl(String url) {
+        // Разрешить только адреса HTTP.
+        if (!url.toLowerCase().startsWith("http://"))
+            return null;
+        // Проверить формат URL.
+        URL verifiedUrl = null;
+        try {
+            verifiedUrl = new URL(url);
+        } catch (Exception e) {
+            return null;
+        }
+        return verifiedUrl;
+    }
+
+    public static void main(String[] args) {
+
+        Scanner in = new Scanner(System.in);
+        System.out.println("Введите адрес сайта ");
+        String url = in.nextLine();
+
+        // spread("http://www.imdb.com/");
+        // spread("http://www.cnet.com/news/");
+        spread(url);
+    }
+
+}
